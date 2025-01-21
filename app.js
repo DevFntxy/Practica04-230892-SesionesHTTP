@@ -1,15 +1,16 @@
-import express from 'express';
+import express, { request, response } from 'express';
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import { v4 as uuidv4 } from 'uuid';
 import cors from 'cors'; // Importar cors
+import os from 'os';
 
 const app = express();
 const PORT = 3500;
 
 // Configuración de CORS
 const corsOptions = {
-    origin: ['http://localhost:3000'], // Dominios permitidos
+    origin: ['http://localhost:3500','http://localhost:192.168.27.55' ], // Dominios permitidos
     methods: ['GET', 'POST', 'PUT', 'DELETE'], // Métodos permitidos
     allowedHeaders: ['Content-Type', 'Authorization'], // Cabeceras permitidas
     credentials: true, // Permitir envío de cookies y credenciales
@@ -48,6 +49,10 @@ const getClientIP = (request) => {
     return ip === "::1" ? "127.0.0.1" : ip;
 };
 
+app.get('/' ,(request, response) => {
+    return response.status(200).json({message : "Bienvenido al API de Control de Sesiones",  author: "Derek Sesni" })
+})
+
 app.post('/login', (request, response) => {
     const { email, nickname, macaAddress } = request.body;
 
@@ -63,7 +68,7 @@ app.post('/login', (request, response) => {
         email,
         nickname,
         macaAddress,
-        ip: getClientIP(request),
+        ip: getServerNetworkInfo(),
         createAt: now,
         lastAccesed: now,
     };
@@ -122,7 +127,7 @@ app.get("/status", (request, response) => {
     });
 });
 
-app.get('/sessions', (request, response) => {
+app.get('/listCurrentSessions', (request, response) => {
     // Si no hay sesiones activas
     if (Object.keys(sessions).length === 0) {
         return response.status(404).json({ message: "No hay sesiones activas" });
@@ -134,3 +139,16 @@ app.get('/sessions', (request, response) => {
         sessions: Object.values(sessions), // Convertimos el objeto de sesiones a un array
     });
 });
+
+
+const getServerNetworkInfo = () => {
+    const interfaces = os.networkInterfaces()
+    for(const name in interfaces){
+        for(const iface of interfaces[name]){
+            if(iface.family === 'IPv4' && !iface.internal ){
+                return{serverIP: iface.address, serverMac: iface.mac}
+            }
+        }
+    }
+}
+
