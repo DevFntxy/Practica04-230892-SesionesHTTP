@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "sesni": "nodemon app.js"
   },
   "keywords": [],
   "author": "Derek Sesni Carreño",
@@ -16,6 +16,8 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "moment-timezone": "^0.5.46",
+    "nodemon": "^3.1.9",
+    "os": "^0.1.2",
     "uuid": "^11.0.5"
   }
 }
