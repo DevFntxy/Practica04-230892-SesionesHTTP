@@ -1,16 +1,18 @@
-import express, { request, response } from 'express';
+import express from 'express'
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import { v4 as uuidv4 } from 'uuid';
 import cors from 'cors'; // Importar cors
 import os from 'os';
+import moment from 'moment-timezone'; // Importar moment-timezone
 
-const app = express();
+const app = express(); 
 const PORT = 3500;
+const MAX_SESSION_DURATION = 30 * 60 * 1000; // 30 minutos en milisegundos
 
 // Configuración de CORS
 const corsOptions = {
-    origin: ['http://localhost:3500','http://localhost:192.168.27.55' ], // Dominios permitidos
+    origin: ['http://localhost:3500', 'http://localhost:192.168.27.55'], // Dominios permitidos
     methods: ['GET', 'POST', 'PUT', 'DELETE'], // Métodos permitidos
     allowedHeaders: ['Content-Type', 'Authorization'], // Cabeceras permitidas
     credentials: true, // Permitir envío de cookies y credenciales
@@ -19,7 +21,7 @@ const corsOptions = {
 app.use(cors(corsOptions)); // Aplicar middleware de CORS
 
 app.listen(PORT, () => {
-    console.log(`Servidor iniciado en http://localhost:${PORT}`);
+    console.log("Servidor iniciado en http://localhost:${PORT}");
 });
 
 app.use(express.json());
@@ -49,9 +51,12 @@ const getClientIP = (request) => {
     return ip === "::1" ? "127.0.0.1" : ip;
 };
 
-app.get('/' ,(request, response) => {
-    return response.status(200).json({message : "Bienvenido al API de Control de Sesiones",  author: "Derek Sesni" })
-})
+app.get('/', (request, response) => {
+    return response.status(200).json({
+        message: "Bienvenido al API de Control de Sesiones",
+        author: "Derek Sesni"
+    });
+});
 
 app.post('/login', (request, response) => {
     const { email, nickname, macaAddress } = request.body;
@@ -61,7 +66,7 @@ app.post('/login', (request, response) => {
     }
 
     const sessionId = uuidv4();
-    const now = new Date();
+    const now = moment.tz('America/Mexico_City'); // Hora actual en CDMX
 
     sessions[sessionId] = {
         sessionId,
@@ -69,8 +74,8 @@ app.post('/login', (request, response) => {
         nickname,
         macaAddress,
         ip: getServerNetworkInfo(),
-        createAt: now,
-        lastAccesed: now,
+        createAt: now.format(), // Hora en formato ISO ajustada a CDMX
+        lastAccesed: now.format(),
     };
 
     response.status(200).json({
@@ -106,7 +111,8 @@ app.post("/update", (request, response) => {
     if (email) sessions[sessionId].email = email;
     if (nickname) sessions[sessionId].nickname = nickname;
 
-    sessions[sessionId].lastAccesed = new Date();
+    // Actualizar lastAccesed aquí
+    sessions[sessionId].lastAccesed = moment.tz('America/Mexico_City').format();
 
     response.status(200).json({
         message: "Sesión actualizada correctamente",
@@ -121,34 +127,81 @@ app.get("/status", (request, response) => {
         return response.status(404).json({ message: "No hay sesión activa" });
     }
 
+    const session = sessions[sessionId];
+    const now = moment.tz('America/Mexico_City'); // Hora actual en CDMX
+    const createdAt = moment(session.createAt);
+    const lastAccessedAt = moment(session.lastAccesed);
+
+    const totalDuration = moment.duration(now.diff(createdAt));
+    const inactivity = moment.duration(now.diff(lastAccessedAt));
+
+    if (totalDuration.asMilliseconds() > MAX_SESSION_DURATION) {
+        // Eliminar la sesión si ha expirado
+        delete sessions[sessionId];
+        return response.status(401).json({ message: "La sesión ha expirado" });
+    }
+
+    // No actualizar lastAccesed aquí
+
     response.status(200).json({
-        message: "Sesión activa",
-        session: sessions[sessionId],
+        message: "Sesión activa.",
+        session: {
+            sessionId: session.sessionId,
+            email: session.email,
+            nickname: session.nickname,
+            macAddress: session.macaAddress,
+            ip: session.ip,
+            createdAt: session.createAt,
+            lastAccessedAt: session.lastAccesed,
+            inactivity: `${Math.floor(inactivity.asMinutes())} minutos y ${inactivity.seconds()} segundos`,
+            totalDuration: `${Math.floor(totalDuration.asHours())} horas, ${totalDuration.minutes()} minutos y ${totalDuration.seconds()} segundos`,
+     },
     });
 });
 
+
 app.get('/listCurrentSessions', (request, response) => {
-    // Si no hay sesiones activas
     if (Object.keys(sessions).length === 0) {
         return response.status(404).json({ message: "No hay sesiones activas" });
     }
 
-    // Devolver todas las sesiones activas
+    const now = moment.tz('America/Mexico_City');
+
+    const activeSessions = Object.values(sessions).map(session => {
+        const createdAt = moment(session.createAt);
+        const lastAccessedAt = moment(session.lastAccesed);
+
+        const totalDuration = moment.duration(now.diff(createdAt));
+        const inactivity = moment.duration(now.diff(lastAccessedAt));
+
+        return {
+            sessionId: session.sessionId,
+            email: session.email,
+            nickname: session.nickname,
+            macAddress: session.macaAddress,
+            ip: session.ip,
+            createdAt: session.createAt,
+            lastAccessedAt: session.lastAccesed,
+            inactivity: `${Math.floor(inactivity.asMinutes())} minutos y ${inactivity.seconds()} segundos`,
+            totalDuration: `${Math.floor(totalDuration.asHours())} horas, ${totalDuration.minutes()} minutos y ${totalDuration.seconds()} segundos`,
+                    
+        };
+    });
+
     response.status(200).json({
         message: "Sesiones activas",
-        sessions: Object.values(sessions), // Convertimos el objeto de sesiones a un array
+        sessions: activeSessions,
     });
 });
 
 
 const getServerNetworkInfo = () => {
-    const interfaces = os.networkInterfaces()
-    for(const name in interfaces){
-        for(const iface of interfaces[name]){
-            if(iface.family === 'IPv4' && !iface.internal ){
-                return{serverIP: iface.address, serverMac: iface.mac}
+    const interfaces = os.networkInterfaces();
+    for (const name in interfaces) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return { serverIP: iface.address, serverMac: iface.mac };
             }
         }
     }
-}
-
+};
