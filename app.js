@@ -36,16 +36,20 @@ app.listen(PORT, () => {
     console.log(`Servidor iniciado en http://localhost:${PORT}`);
 });
 
-// Obtener la IP y MAC del cliente
+// Obtener la IP del cliente
 const getClientIP = (request) => {
-    const ip =
-        request.headers["x-forwarded-for"] ||
-        request.connection.remoteAddress ||
-        request.socket.remoteAddress ||
-        request.connection.socket?.remoteAddress;
+    let ip = request.headers["x-forwarded-for"] ||
+             request.connection.remoteAddress ||
+             request.socket.remoteAddress ||
+             request.connection.socket?.remoteAddress;
+
+    if (ip && ip.startsWith("::ffff:")) {
+        ip = ip.substring(7); 
+    }
 
     return ip === "::1" ? "127.0.0.1" : ip;
 };
+
 
 // Obtener la IP y MAC del servidor
 const getServerNetworkInfo = () => {
@@ -57,11 +61,17 @@ const getServerNetworkInfo = () => {
             }
         }
     }
-    return { serverIP: "0.0.0.0", serverMac: "00:00:00:00:00:00" };
 };
 
+app.get('/', (request, response) => {
+    return response.status(200).json({
+        message: "Bienvenido al API de Control de Sesiones",
+        author: "Derek Sesni"
+    });
+});
+
 app.post('/login', (request, response) => {
-    const { email, nickname, macAddress } = request.body; // `macAddress` del cliente enviada en el request
+    const { email, nickname, macAddress } = request.body;
 
     if (!email || !nickname || !macAddress) {
         return response.status(400).json({ message: "Se esperan campos requeridos" });
@@ -75,10 +85,10 @@ app.post('/login', (request, response) => {
         sessionId,
         email,
         nickname,
-        clientMacAddress: macAddress,  // Guardamos la MAC del cliente
+        clientMacAddress: macAddress,
         clientIP: getClientIP(request),
-        serverIP,
-        serverMacAddress: serverMac,  // Guardamos la MAC del servidor
+        serverIP: getServerNetworkInfo(request),
+        serverMacAddress: serverMac,
         createAt: now.format(),
         lastAccesed: now.format(),
     };
@@ -89,13 +99,66 @@ app.post('/login', (request, response) => {
     });
 });
 
+app.post("/logout", (request, response) => {
+    const { sessionId } = request.body;
+
+    if (!sessionId || !sessions[sessionId]) {
+        return response.status(404).json({ message: "No se ha encontrado una sesión activa" });
+    }
+
+    delete sessions[sessionId];
+    request.session.destroy((err) => {
+        if (err) {
+            return response.status(500).send("Error al cerrar sesión");
+        }
+        response.status(200).json({ message: "Logout successful" });
+    });
+});
+
+app.get("/status", (request, response) => {
+    const sessionId = request.query.sessionId;
+
+    if (!sessionId || !sessions[sessionId]) {
+        return response.status(404).json({ message: "No hay sesión activa" });
+    }
+
+    const session = sessions[sessionId];
+    const now = moment.tz('America/Mexico_City');
+    const createdAt = moment(session.createAt);
+    const lastAccessedAt = moment(session.lastAccesed);
+
+    const totalDuration = moment.duration(now.diff(createdAt));
+    const inactivity = moment.duration(now.diff(lastAccessedAt));
+
+    if (totalDuration.asMilliseconds() > MAX_SESSION_DURATION) {
+        delete sessions[sessionId];
+        return response.status(401).json({ message: "La sesión ha expirado" });
+    }
+
+    response.status(200).json({
+        message: "Sesión activa.",
+        session: {
+            sessionId: session.sessionId,
+            email: session.email,
+            nickname: session.nickname,
+            clientMacAddress: session.clientMacAddress,
+            clientIP: session.clientIP,
+            serverMacAddress: session.serverMacAddress,
+            serverIP: session.serverIP,
+            createdAt: session.createAt,
+            lastAccessedAt: session.lastAccesed,
+            inactivity: `${Math.floor(inactivity.asMinutes())} minutos y ${inactivity.seconds()} segundos`,
+            totalDuration: `${Math.floor(totalDuration.asHours())} horas, ${totalDuration.minutes()} minutos y ${totalDuration.seconds()} segundos`,
+        },
+    });
+});
+
 app.get('/listCurrentSessions', (request, response) => {
     if (Object.keys(sessions).length === 0) {
         return response.status(404).json({ message: "No hay sesiones activas" });
     }
 
     const now = moment.tz('America/Mexico_City');
-
     const activeSessions = Object.values(sessions).map(session => {
         const createdAt = moment(session.createAt);
         const lastAccessedAt = moment(session.lastAccesed);
@@ -107,7 +170,7 @@ app.get('/listCurrentSessions', (request, response) => {
             sessionId: session.sessionId,
             email: session.email,
             nickname: session.nickname,
-            clientMacAddress: session.clientMacAddress, 
+            clientMacAddress: session.clientMacAddress,
             clientIP: session.clientIP,
             serverMacAddress: session.serverMacAddress,
             serverIP: session.serverIP,
@@ -121,5 +184,23 @@ app.get('/listCurrentSessions', (request, response) => {
     response.status(200).json({
         message: "Sesiones activas",
         sessions: activeSessions,
+    });
+});
+app.post("/update", (request, response) => {
+    const { sessionId, email, nickname } = request.body;
+
+    if (!sessionId || !sessions[sessionId]) {
+        return response.status(404).json({ message: "No existe una sesión activa" });
+    }
+
+    if (email) sessions[sessionId].email = email;
+    if (nickname) sessions[sessionId].nickname = nickname;
+
+    // Actualizar lastAccesed aquí
+    sessions[sessionId].lastAccesed = moment.tz('America/Mexico_City').format();
+
+    response.status(200).json({
+        message: "Sesión actualizada correctamente",
+        session: sessions[sessionId],
     });
 });
